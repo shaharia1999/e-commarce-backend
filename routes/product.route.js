@@ -14,7 +14,7 @@ const verifyToken = require("../middleware/auth.middleware"); // Import the toke
 router.post("/", verifyToken, productController.createProduct);
 // Public routes
 router.get("/", productController.getProducts);
-router.get("/:id", visitorCounter, productController.getProductById);
+router.get("/:slug", visitorCounter, productController.getProductById);
 router.patch("/:id", productController.updateProduct);
 router.delete("/:id", productController.deleteProduct);
 

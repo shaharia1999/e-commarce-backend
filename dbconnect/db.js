@@ -17,15 +17,21 @@ const connectDB = async () => {
     await mongoose.connect("mongodb://127.0.0.1:27017/testProductDb");
     console.log("MongoDB connected successfully");
 
-    // Drop the problematic index
-    const indexes = await mongoose.connection.collection('products').indexes();
-    const hasNameIndex = indexes.find(index => index.name === 'name_1');
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const hasProductsCollection = collections.some(col => col.name === 'products');
 
-    if (hasNameIndex) {
-      await mongoose.connection.collection('products').dropIndex('name_1');
-      console.log("Dropped index: name_1");
+    if (hasProductsCollection) {
+      const indexes = await mongoose.connection.collection('products').indexes();
+      const hasNameIndex = indexes.find(index => index.name === 'name_1');
+
+      if (hasNameIndex) {
+        await mongoose.connection.collection('products').dropIndex('name_1');
+        console.log("Dropped index: name_1");
+      } else {
+        console.log("No index named 'name_1' found.");
+      }
     } else {
-      console.log("No index named 'name_1' found.");
+      console.log("Collection 'products' does not exist.");
     }
 
   } catch (err) {

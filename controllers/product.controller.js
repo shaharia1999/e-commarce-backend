@@ -106,9 +106,7 @@ exports.getProducts = async (req, res) => {
       page = 1,
       limit = 10,
     } = req.query;
-
     const filter = {};
-
     // Search
     if (search) {
       filter.$or = [
@@ -116,53 +114,56 @@ exports.getProducts = async (req, res) => {
         { description: { $regex: search, $options: 'i' } },
       ];
     }
-
     // Category, Color, Size
     if (category) filter.category = category;
     if (color) filter['filters.color'] = color;
     if (size) filter['filters.size'] = size;
-
     // Price Range
     if (priceMin || priceMax) {
       filter.price = {};
       if (priceMin) filter.price.$gte = Number(priceMin);
       if (priceMax) filter.price.$lte = Number(priceMax);
     }
-
     // Created Date
     if (createdAfter || createdBefore) {
       filter.createdAt = {};
       if (createdAfter) filter.createdAt.$gte = new Date(createdAfter);
       if (createdBefore) filter.createdAt.$lte = new Date(createdBefore);
     }
-
-    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const pageNum = Math.max(Number(page), 1);
+    const limitNum = Math.max(Number(limit), 1);
+    const skip = (pageNum - 1) * limitNum;
     const sortOption = {};
     sortOption[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-    const productsRaw = await Product.find(filter)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(Number(limit));
-
-    const total = await Product.countDocuments(filter);
-
-    // 💡 Add discounted price in response
+    const [productsRaw, total] = await Promise.all([
+      Product.find(filter)
+        .select('title price discount mainImage slug stock category _id')
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limitNum),
+      Product.countDocuments(filter),
+    ]);
     const products = productsRaw.map((product) => {
       const discountAmount = (product.price * product.discount) / 100;
       const discountedPrice = product.price - discountAmount;
 
       return {
-        ...product.toObject(),
-        discountedPrice: Math.round(discountedPrice * 100) / 100, // rounded to 2 decimals
+        title: product.title,
+        id: product._id,
+        slug: product.slug,
+        stock: product.stock,
+        category:product.category,
         originalPrice: product.price,
+        discountedPrice: Math.round(discountedPrice * 100) / 100,
+        mainImg: product.mainImage, 
+
       };
     });
 
     res.json({
       total,
-      page: Number(page),
-      pages: Math.ceil(total / Number(limit)),
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
       products,
     });
   } catch (error) {
@@ -171,31 +172,73 @@ exports.getProducts = async (req, res) => {
 };
 
 
+
 // Get product by ID
-exports.getProductById = async (req, res) => {
+// exports.getProductById = async (req, res) => {
+//   try {
+//     const product = await Product.findById(req.params.id).select("title");
+//     // const product = await Product.findById(req.params.id);
+//     if (!product) return res.status(404).send({ message: "Product not found" });
+//     res.status(200).send({
+//       message: "Product found",
+//       data: product,
+//       visitCount: req.visitCount || 0, // Include visit count
+//     });
+//   } catch (err) {
+//     res.status(500).send({ message: err.message });
+//   }
+// };
+exports.getProductById  = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).select("name");
-    if (!product) return res.status(404).send({ message: "Product not found" });
-    res.status(200).send({
-      message: "Product found",
-      data: product,
+    const { slug } = req.params;
+    const product = await Product.findOne({ slug });
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+    const discountAmount = (product.price * product.discount) / 100;
+    const discountedPrice = product.price - discountAmount;
+    res.json({
+      ...product.toObject(),
+      originalPrice: product.price,
+      discountedPrice: Math.round(discountedPrice * 100) / 100,
+      mainImg: product.mainImage, // alias for clarity in frontend
       visitCount: req.visitCount || 0, // Include visit count
+
     });
-  } catch (err) {
-    res.status(500).send({ message: err.message });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
 
-// Update product
+
+// // Update product
+// exports.updateProduct = async (req, res) => {
+//   try {
+//     const { name, price, description } = req.body;
+//     const product = await Product.findByIdAndUpdate(
+//       req.params.id,
+//       { name, price, description },
+//       { new: true }
+//     );
+//     if (!product) return res.status(404).send({ message: "Product not found" });
+//     res.status(200).send({ message: "Product updated", data: product });
+//   } catch (err) {
+//     res.status(500).send({ message: err.message });
+//   }
+// };
+// ✅ Updated: uses the full req.body instead of hardcoded fields
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, price, description } = req.body;
     const product = await Product.findByIdAndUpdate(
       req.params.id,
-      { name, price, description },
-      { new: true }
+      req.body, // ✅ use full body for update
+      { new: true, runValidators: true } // ✅ run validators
     );
-    if (!product) return res.status(404).send({ message: "Product not found" });
+
+    if (!product) {
+      return res.status(404).send({ message: "Product not found" });
+    }
+
     res.status(200).send({ message: "Product updated", data: product });
   } catch (err) {
     res.status(500).send({ message: err.message });
@@ -206,9 +249,14 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
-    if (!product) return res.status(404).send({ message: "Product not found" });
+
+    if (!product) {
+      return res.status(404).send({ message: "Product not found" });
+    }
+
     res.status(200).send({ message: "Product deleted", data: product });
   } catch (err) {
     res.status(500).send({ message: err.message });
   }
 };
+

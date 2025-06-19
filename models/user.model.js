@@ -13,8 +13,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Password is required']
   },
+  role: {
+    type: String,
+    enum: ['user', 'moderator', 'admin'],
+    default: 'user'
+  },
   resetPasswordToken: String,
   resetPasswordExpires: Date
 }, { timestamps: true });
+
 
 module.exports = mongoose.model('User', userSchema);

@@ -4,10 +4,11 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
+
+
 exports.register = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     // Check if email already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -25,6 +26,8 @@ exports.register = async (req, res) => {
   }
 };
 
+
+
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -35,10 +38,17 @@ exports.login = async (req, res) => {
       return res.status(401).send({ message: 'Invalid credentials' });
     }
 
-    // Generate JWT
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRATION || '1h',
-    });
+    // ✅ Include role in the JWT
+    const token = jwt.sign(
+      {
+        id: user._id,
+        role: user.role, // ← Include role
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRATION || '1h',
+      }
+    );
 
     res.send({ message: 'Login successful', token });
   } catch (err) {
@@ -107,4 +117,67 @@ exports.resetPassword = async (req, res) => {
     res.status(500).send({ message: err.message });
   }
 };
+// PATCH /auth/:id/role
+exports.updateUserRole = async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  const validRoles = ['user', 'moderator', 'admin'];
+
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({ message: 'Invalid role specified' });
+  }
+
+  try {
+    const requestingUser = await User.findById(req.user.id);
+    const targetUser = await User.findById(id);
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Target user not found' });
+    }
+
+    // Prevent changing your own role
+    if (requestingUser._id.toString() === targetUser._id.toString()) {
+      return res.status(403).json({ message: "You can't change your own role" });
+    }
+
+    // Moderator can change user <-> admin
+    if (requestingUser.role === 'moderator') {
+      if (!['user', 'admin'].includes(targetUser.role)) {
+        return res.status(403).json({
+          message: 'Moderators cannot change role of other moderators',
+        });
+      }
+      if (!['user', 'admin'].includes(role)) {
+        return res.status(403).json({
+          message: 'Moderators can only assign user or admin role',
+        });
+      }
+    }
+
+    // Admin can only promote user -> admin
+    if (requestingUser.role === 'admin') {
+      if (targetUser.role !== 'user') {
+        return res.status(403).json({
+          message: 'Admins can only promote users to admin',
+        });
+      }
+      if (role !== 'admin') {
+        return res.status(403).json({
+          message: 'Admins can only assign admin role',
+        });
+      }
+    }
+
+    targetUser.role = role;
+    await targetUser.save();
+
+    res.status(200).json({
+      message: 'User role updated successfully',
+      user: targetUser,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 

@@ -117,6 +117,15 @@ exports.resetPassword = async (req, res) => {
     res.status(500).send({ message: err.message });
   }
 };
+// get all user 
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find(); // get all users
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 // PATCH /auth/:id/role
 exports.updateUserRole = async (req, res) => {
   const { id } = req.params;

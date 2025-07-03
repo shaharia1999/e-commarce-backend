@@ -120,12 +120,45 @@ exports.resetPassword = async (req, res) => {
 // get all user 
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find(); // get all users
-    res.status(200).json(users);
+    const {
+      search,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const filter = {};
+
+    // Search on name or email (for example)
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const pageNum = Math.max(Number(page), 1);
+    const limitNum = Math.max(Number(limit), 1);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get users with filter, pagination
+    const [usersRaw, total] = await Promise.all([
+      User.find(filter)
+        .skip(skip)
+        .limit(limitNum),
+      User.countDocuments(filter),
+    ]);
+
+    res.json({
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      users: usersRaw,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 // PATCH /auth/:id/role
 exports.updateUserRole = async (req, res) => {
   const { id } = req.params;

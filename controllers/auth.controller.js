@@ -6,10 +6,10 @@ const nodemailer = require('nodemailer');
 
 
 
+
 exports.register = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    // Check if email already exists
+    const { email, password, role } = req.body; 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).send({ message: 'Email already registered' });
@@ -17,10 +17,28 @@ exports.register = async (req, res) => {
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({ email, password: hashedPassword });
+
+    // Create new user, optionally assigning a default role if not provided
+    const newUser = new User({
+      email,
+      password: hashedPassword,
+      role: role || 'user', // Assign 'user' as a default role if not provided
+    });
     await newUser.save();
 
-    res.status(201).send({ message: 'User registered successfully' });
+    // Generate JWT for the newly registered user
+    const token = jwt.sign(
+      {
+        id: newUser._id,
+        role: newUser.role,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRATION || '1h',
+      }
+    );
+
+    res.status(201).send({ message: 'User registered successfully', token });
   } catch (err) {
     res.status(400).send({ message: err.message });
   }
@@ -221,5 +239,52 @@ exports.updateUserRole = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+exports.deleteUser = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1. Load both the requester and the target user
+    const requestingUser = await User.findById(req.user.id);
+    const targetUser     = await User.findById(id);
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Target user not found' });
+    }
+
+    // 2. Prevent self‑deletion
+    if (requestingUser._id.equals(targetUser._id)) {
+      return res.status(403).json({ message: "You can't delete your own account" });
+    }
+
+    // 3. Authorization logic based on requester.role
+    switch (requestingUser.role) {
+      case 'moderator':
+        // Moderators can delete anyone except themselves (already checked)
+        break;
+
+      case 'admin':
+        // Admins can only delete plain users
+        if (targetUser.role !== 'user') {
+          return res.status(403).json({
+            message: 'Admins can only delete regular users, not moderators or other admins',
+          });
+        }
+        break;
+
+      default:
+        // All other roles are forbidden
+        return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // 4. Perform deletion
+    await targetUser.deleteOne();
+    res.status(200).json({ message: 'User deleted successfully' });
+
+  } catch (error) {
+    console.error('deleteUser error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 
 

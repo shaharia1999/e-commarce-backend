@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const orderSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User', // Optional: only set if logged in
+    ref: 'User', // Optional: only set if logged in 
     default: null,
   },
   address: { type: String, required: true },

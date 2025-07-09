@@ -32,7 +32,7 @@
 //   },
 // });
 
-// module.exports = mongoose.model("Product", productSchema);
+// module.exports = mongoose.model("Product", productSchema); new
 const mongoose = require('mongoose');
 const productSchema = new mongoose.Schema({
   title: { type: String, required: true },

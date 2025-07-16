@@ -105,8 +105,11 @@ exports.getProducts = async (req, res) => {
       sortOrder = 'desc',
       page = 1,
       limit = 10,
+      discount, // added
     } = req.query;
+
     const filter = {};
+
     // Search
     if (search) {
       filter.$or = [
@@ -114,49 +117,103 @@ exports.getProducts = async (req, res) => {
         { description: { $regex: search, $options: 'i' } },
       ];
     }
+
     // Category, Color, Size
     if (category) filter.category = category;
     if (color) filter['filters.color'] = color;
     if (size) filter['filters.size'] = size;
+
     // Price Range
     if (priceMin || priceMax) {
       filter.price = {};
       if (priceMin) filter.price.$gte = Number(priceMin);
       if (priceMax) filter.price.$lte = Number(priceMax);
     }
+
     // Created Date
     if (createdAfter || createdBefore) {
       filter.createdAt = {};
       if (createdAfter) filter.createdAt.$gte = new Date(createdAfter);
       if (createdBefore) filter.createdAt.$lte = new Date(createdBefore);
     }
+
+    // Discount
+    if (discount === 'true') {
+      filter.discount = { $gt: 0 };
+    }
+
     const pageNum = Math.max(Number(page), 1);
     const limitNum = Math.max(Number(limit), 1);
     const skip = (pageNum - 1) * limitNum;
-    const sortOption = {};
-    sortOption[sortBy] = sortOrder === 'asc' ? 1 : -1;
-    const [productsRaw, total] = await Promise.all([
-      Product.find(filter)
-        .select('title price discount mainImage slug stock category _id')
-        .sort(sortOption)
-        .skip(skip)
-        .limit(limitNum),
-      Product.countDocuments(filter),
-    ]);
+
+    let productsRaw;
+    let total;
+
+    if (sortBy === 'discountedPrice') {
+      [productsRaw, total] = await Promise.all([
+        Product.aggregate([
+          { $match: filter },
+          {
+            $addFields: {
+              discountedPrice: {
+                $round: [
+                  {
+                    $subtract: [
+                      '$price',
+                      { $divide: [{ $multiply: ['$price', '$discount'] }, 100] },
+                    ],
+                  },
+                  2,
+                ],
+              },
+            },
+          },
+          { $sort: { discountedPrice: sortOrder === 'asc' ? 1 : -1 } },
+          { $skip: skip },
+          { $limit: limitNum },
+          {
+            $project: {
+              title: 1,
+              slug: 1,
+              stock: 1,
+              category: 1,
+              mainImg: '$mainImage',
+              originalPrice: '$price',
+              discountedPrice: 1,
+            },
+          },
+        ]),
+        Product.countDocuments(filter),
+      ]);
+    } else {
+      const sortOption = {};
+      sortOption[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+      [productsRaw, total] = await Promise.all([
+        Product.find(filter)
+          .select('title price discount mainImage slug stock category _id')
+          .sort(sortOption)
+          .skip(skip)
+          .limit(limitNum),
+        Product.countDocuments(filter),
+      ]);
+    }
+
     const products = productsRaw.map((product) => {
-      const discountAmount = (product.price * product.discount) / 100;
-      const discountedPrice = product.price - discountAmount;
+      const discountAmount = (product.originalPrice ?? product.price) * (product.discount ?? 0) / 100;
+      const discountedPrice = (product.discountedPrice !== undefined)
+        ? product.discountedPrice
+        : (product.price - discountAmount);
 
       return {
         title: product.title,
         id: product._id,
         slug: product.slug,
         stock: product.stock,
-        category:product.category,
-        originalPrice: product.price,
+        category: product.category,
+        originalPrice: product.originalPrice ?? product.price,
         discountedPrice: Math.round(discountedPrice * 100) / 100,
-        mainImg: product.mainImage, 
-
+        mainImg: product.mainImg ?? product.mainImage,
       };
     });
 
@@ -170,6 +227,8 @@ exports.getProducts = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
 
 
 

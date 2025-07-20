@@ -38,7 +38,7 @@ exports.register = async (req, res) => {
       }
     );
 
-    res.status(201).send({ message: 'User registered successfully', token });
+    res.status(201).send({ message: 'User registered successfully', token, userId: newUser._id  });
   } catch (err) {
     res.status(400).send({ message: err.message });
   }
@@ -68,7 +68,7 @@ exports.login = async (req, res) => {
       }
     );
 
-    res.send({ message: 'Login successful', token });
+    res.send({ message: 'Login successful', token, userId: user._id  });
   } catch (err) {
     res.status(500).send({ message: err.message });
   }

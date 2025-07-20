@@ -34,7 +34,7 @@ exports.createOrder = async (req, res) => {
 
     totalAmount += deliveryCharge;
 
-    const userId = req.user ? req.user._id : null;
+   const userId = req.body.user || null; // ✅ token না থাকলে frontend থেকে আসা user id ধরুন
 
     const order = new Order({
       user: userId,

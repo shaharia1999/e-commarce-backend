@@ -8,14 +8,7 @@ const uri = "mongodb+srv://adeptshaharia:C9DWzWZzkBwSpU80@cluster0.g0iqbcg.mongo
 const connectDB = async () => {
   try {
     await mongoose.connect(uri, {
-<<<<<<< HEAD
-      // Mongoose 6.x and later automatically handle these options,
-      // but they are kept for clarity and compatibility with older versions.
-      // useNewUrlParser: true,
-      // useUnifiedTopology: true,
-=======
  
->>>>>>> 1f23af1fb54005bdd1243be4ca3014e50ab66127
       serverSelectionTimeoutMS: 30000, // Keep trying to send operations for 30 seconds
       socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
     });

@@ -6,6 +6,7 @@ const applyCommonMiddleware = (app) => {
     'http://localhost:3000',
     'https://mongo-db-zeta-seven.vercel.app',
     'https://e-eomarce-edmin-eanel.vercel.app',
+    'https://ecommerce-web-1l99.vercel.app/'
   ];
 
   app.use(express.json());

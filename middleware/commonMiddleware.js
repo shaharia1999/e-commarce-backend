@@ -4,7 +4,8 @@ const cors = require("cors");
 const applyCommonMiddleware = (app) => {
   const allowedOrigins = [
     'http://localhost:3000',
-    'https://mongo-db-zeta-seven.vercel.app'
+    'https://mongo-db-zeta-seven.vercel.app',
+    'https://e-eomarce-edmin-eanel.vercel.app',
   ];
 
   app.use(express.json());

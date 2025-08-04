@@ -9,7 +9,6 @@ const applyCommonMiddleware = (app) => {
   ];
 
   app.use(express.json());
-
   app.use(cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like curl or mobile apps)

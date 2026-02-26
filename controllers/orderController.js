@@ -3,7 +3,7 @@ const Product = require("../models/product.model");
 const User = require("../models/user.model");
 exports.createOrder = async (req, res) => {
   try {
-    const { address, mobile, products, deliveryCharge = 0 } = req.body;
+    const { address, mobile, products, name, deliveryCharge = 0 } = req.body;
     if (!address || !mobile || !products || !products.length) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -34,10 +34,11 @@ exports.createOrder = async (req, res) => {
 
     totalAmount += deliveryCharge;
 
-   const userId = req.body.user || null; // ✅ token না থাকলে frontend থেকে আসা user id ধরুন
+    const userId = req.body.user || null; // ✅ token না থাকলে frontend থেকে আসা user id ধরুন
 
     const order = new Order({
       user: userId,
+      name,
       address,
       mobile,
       products,
@@ -54,14 +55,17 @@ exports.createOrder = async (req, res) => {
 };
 exports.getUserOrders = async (req, res) => {
   try {
-    const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
+    // const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
+    // To this:
+    const mongoose = require("mongoose");
+    const userId = new mongoose.Types.ObjectId(req.user._id);
     const {
       search,
       page = 1,
       limit = 10,
       status, // Optional: filter by order status
-      sortBy = 'createdAt', // Default sort by createdAt
-      sortOrder = 'desc',   // Default sort order descending
+      sortBy = "createdAt", // Default sort by createdAt
+      sortOrder = "desc", // Default sort order descending
     } = req.query;
 
     const pageNum = Math.max(Number(page), 1);
@@ -75,14 +79,19 @@ exports.getUserOrders = async (req, res) => {
     const baseMatch = { user: userId };
 
     // Add status filter if provided
-    if (status && typeof status === 'string' && ["pending", "processing", "completed", "cancelled"].includes(status)) {
+    if (
+      status &&
+      typeof status === "string" &&
+      ["pending", "processing", "completed", "cancelled"].includes(status)
+    ) {
       baseMatch.status = status;
     }
 
     // Determine sort criteria
     const sortCriteria = {};
-    if (sortBy && ['createdAt', 'totalAmount', 'status'].includes(sortBy)) { // Add more sortable fields as needed
-      sortCriteria[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    if (sortBy && ["createdAt", "totalAmount", "status"].includes(sortBy)) {
+      // Add more sortable fields as needed
+      sortCriteria[sortBy] = sortOrder === "asc" ? 1 : -1;
     } else {
       sortCriteria.createdAt = -1; // Default sort if invalid sortBy
     }
@@ -90,7 +99,7 @@ exports.getUserOrders = async (req, res) => {
     if (search) {
       // Aggregation pipeline for searching within populated product titles
       // and potentially direct order fields like totalAmount (if number search)
-      const searchRegex = { $regex: search, $options: 'i' };
+      const searchRegex = { $regex: search, $options: "i" };
 
       const aggregationPipeline = [
         { $match: baseMatch }, // Start with base user filter and optional status filter
@@ -99,17 +108,17 @@ exports.getUserOrders = async (req, res) => {
             from: "products", // Ensure this matches your product collection name
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts"
-          }
+            as: "populatedProducts",
+          },
         },
         { $unwind: "$products" }, // Unwind original products array
         {
-            $lookup: {
-                from: "products", // Again, the product collection
-                localField: "products.product",
-                foreignField: "_id",
-                as: "originalProductDetails" // Join again to get product details for the original 'products' array item
-            }
+          $lookup: {
+            from: "products", // Again, the product collection
+            localField: "products.product",
+            foreignField: "_id",
+            as: "originalProductDetails", // Join again to get product details for the original 'products' array item
+          },
         },
         { $unwind: "$originalProductDetails" }, // Unwind the newly populated product details
         {
@@ -117,31 +126,39 @@ exports.getUserOrders = async (req, res) => {
             $or: [
               { "originalProductDetails.title": searchRegex }, // Search by product title
               // Optional: Search by order totalAmount if `search` is a number
-              ...(isNaN(Number(search)) ? [] : [{ totalAmount: Number(search) }]),
+              ...(isNaN(Number(search))
+                ? []
+                : [{ totalAmount: Number(search) }]),
               // Add other direct order fields you want to search here
               // e.g., { "address": searchRegex },
               // e.g., { "mobile": searchRegex },
-            ]
-          }
+            ],
+          },
         },
         {
           $group: {
             _id: "$_id", // Group back by original order _id
             user: { $first: "$user" },
+            name: { $first: "$name" },
             address: { $first: "$address" },
             mobile: { $first: "$mobile" },
-            products: { $push: { product: "$originalProductDetails._id", quantity: "$products.quantity" } }, // Reconstruct products array with just IDs and quantity for re-population
+            products: {
+              $push: {
+                product: "$originalProductDetails._id",
+                quantity: "$products.quantity",
+              },
+            }, // Reconstruct products array with just IDs and quantity for re-population
             totalAmount: { $first: "$totalAmount" },
             deliveryCharge: { $first: "$deliveryCharge" },
             status: { $first: "$status" },
             createdAt: { $first: "$createdAt" },
             updatedAt: { $first: "$updatedAt" },
-            __v: { $first: "$__v" }
-          }
+            __v: { $first: "$__v" },
+          },
         },
         { $sort: sortCriteria }, // Apply sorting
         { $skip: skip },
-        { $limit: limitNum }
+        { $limit: limitNum },
       ];
 
       orders = await Order.aggregate(aggregationPipeline);
@@ -161,25 +178,26 @@ exports.getUserOrders = async (req, res) => {
             from: "products",
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts"
-          }
+            as: "populatedProducts",
+          },
         },
         { $unwind: "$populatedProducts" },
         {
           $match: {
             $or: [
               { "populatedProducts.title": searchRegex },
-              ...(isNaN(Number(search)) ? [] : [{ totalAmount: Number(search) }]),
-            ]
-          }
+              ...(isNaN(Number(search))
+                ? []
+                : [{ totalAmount: Number(search) }]),
+            ],
+          },
         },
         { $group: { _id: "$_id" } }, // Group by original order ID to count unique orders
-        { $count: "total" }
+        { $count: "total" },
       ];
 
       const countResult = await Order.aggregate(countPipeline);
       totalOrders = countResult.length > 0 ? countResult[0].total : 0;
-
     } else {
       // Original logic for when no search term is provided (but now with pagination and sort)
       [orders, totalOrders] = await Promise.all([
@@ -211,8 +229,8 @@ exports.getUserOrdersbyId = async (req, res) => {
       page = 1,
       limit = 10,
       status, // Optional: filter by order status
-      sortBy = 'createdAt', // Default sort by createdAt
-      sortOrder = 'desc',   // Default sort order descending
+      sortBy = "createdAt", // Default sort by createdAt
+      sortOrder = "desc", // Default sort order descending
     } = req.query;
 
     const pageNum = Math.max(Number(page), 1);
@@ -226,14 +244,19 @@ exports.getUserOrdersbyId = async (req, res) => {
     const baseMatch = { user: userId };
 
     // Add status filter if provided
-    if (status && typeof status === 'string' && ["pending", "processing", "completed", "cancelled"].includes(status)) {
+    if (
+      status &&
+      typeof status === "string" &&
+      ["pending", "processing", "completed", "cancelled"].includes(status)
+    ) {
       baseMatch.status = status;
     }
 
     // Determine sort criteria
     const sortCriteria = {};
-    if (sortBy && ['createdAt', 'totalAmount', 'status'].includes(sortBy)) { // Add more sortable fields as needed
-      sortCriteria[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    if (sortBy && ["createdAt", "totalAmount", "status"].includes(sortBy)) {
+      // Add more sortable fields as needed
+      sortCriteria[sortBy] = sortOrder === "asc" ? 1 : -1;
     } else {
       sortCriteria.createdAt = -1; // Default sort if invalid sortBy
     }
@@ -241,7 +264,7 @@ exports.getUserOrdersbyId = async (req, res) => {
     if (search) {
       // Aggregation pipeline for searching within populated product titles
       // and potentially direct order fields like totalAmount (if number search)
-      const searchRegex = { $regex: search, $options: 'i' };
+      const searchRegex = { $regex: search, $options: "i" };
 
       const aggregationPipeline = [
         { $match: baseMatch }, // Start with base user filter and optional status filter
@@ -250,28 +273,29 @@ exports.getUserOrdersbyId = async (req, res) => {
             from: "products", // Ensure this matches your product collection name
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts"
-          }
+            as: "populatedProducts",
+          },
         },
         { $unwind: "$products" }, // Unwind original products array
         {
-            $lookup: {
-                from: "products", // Again, the product collection
-                localField: "products.product",
-                foreignField: "_id",
-                as: "originalProductDetails" // Join again to get product details for the original 'products' array item
-            }
+          $lookup: {
+            from: "products", // Again, the product collection
+            localField: "products.product",
+            foreignField: "_id",
+            as: "originalProductDetails", // Join again to get product details for the original 'products' array item
+          },
         },
         { $unwind: "$originalProductDetails" }, // Unwind the newly populated product details
         {
           $match: {
             $or: [
               { "originalProductDetails.title": searchRegex }, // Search by product title
-             
-              ...(isNaN(Number(search)) ? [] : [{ totalAmount: Number(search) }]),
-          
-            ]
-          }
+
+              ...(isNaN(Number(search))
+                ? []
+                : [{ totalAmount: Number(search) }]),
+            ],
+          },
         },
         {
           $group: {
@@ -279,18 +303,23 @@ exports.getUserOrdersbyId = async (req, res) => {
             user: { $first: "$user" },
             address: { $first: "$address" },
             mobile: { $first: "$mobile" },
-            products: { $push: { product: "$originalProductDetails._id", quantity: "$products.quantity" } }, // Reconstruct products array with just IDs and quantity for re-population
+            products: {
+              $push: {
+                product: "$originalProductDetails._id",
+                quantity: "$products.quantity",
+              },
+            }, // Reconstruct products array with just IDs and quantity for re-population
             totalAmount: { $first: "$totalAmount" },
             deliveryCharge: { $first: "$deliveryCharge" },
             status: { $first: "$status" },
             createdAt: { $first: "$createdAt" },
             updatedAt: { $first: "$updatedAt" },
-            __v: { $first: "$__v" }
-          }
+            __v: { $first: "$__v" },
+          },
         },
         { $sort: sortCriteria }, // Apply sorting
         { $skip: skip },
-        { $limit: limitNum }
+        { $limit: limitNum },
       ];
 
       orders = await Order.aggregate(aggregationPipeline);
@@ -310,25 +339,26 @@ exports.getUserOrdersbyId = async (req, res) => {
             from: "products",
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts"
-          }
+            as: "populatedProducts",
+          },
         },
         { $unwind: "$populatedProducts" },
         {
           $match: {
             $or: [
               { "populatedProducts.title": searchRegex },
-              ...(isNaN(Number(search)) ? [] : [{ totalAmount: Number(search) }]),
-            ]
-          }
+              ...(isNaN(Number(search))
+                ? []
+                : [{ totalAmount: Number(search) }]),
+            ],
+          },
         },
         { $group: { _id: "$_id" } }, // Group by original order ID to count unique orders
-        { $count: "total" }
+        { $count: "total" },
       ];
 
       const countResult = await Order.aggregate(countPipeline);
       totalOrders = countResult.length > 0 ? countResult[0].total : 0;
-
     } else {
       // Original logic for when no search term is provided (but now with pagination and sort)
       [orders, totalOrders] = await Promise.all([
@@ -467,7 +497,7 @@ exports.getMonthlyOrderStats = async (req, res) => {
 
       // Find aggregation result for this month
       const foundMonthStats = aggregatedStats.find(
-        (stat) => stat._id === monthNumber
+        (stat) => stat._id === monthNumber,
       );
 
       if (foundMonthStats) {
@@ -522,11 +552,9 @@ exports.updateOrderStatus = async (req, res) => {
 
       // Moderators cannot change status of completed or cancelled orders
       if (["completed", "cancelled"].includes(order.status)) {
-        return res
-          .status(403)
-          .json({
-            message: "Cannot change status of completed or cancelled orders",
-          });
+        return res.status(403).json({
+          message: "Cannot change status of completed or cancelled orders",
+        });
       }
 
       // Allowed transitions for moderators

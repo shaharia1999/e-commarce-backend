@@ -129,6 +129,7 @@ exports.getUserOrders = async (req, res) => {
           $group: {
             _id: "$_id", // Group back by original order _id
             user: { $first: "$user" },
+            name: { $first: "$name" },
             address: { $first: "$address" },
             mobile: { $first: "$mobile" },
             products: { $push: { product: "$originalProductDetails._id", quantity: "$products.quantity" } }, // Reconstruct products array with just IDs and quantity for re-population

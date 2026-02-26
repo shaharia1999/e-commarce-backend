@@ -55,10 +55,7 @@ exports.createOrder = async (req, res) => {
 };
 exports.getUserOrders = async (req, res) => {
   try {
-    // const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
-    // To this:
-    const mongoose = require("mongoose");
-    const userId = new mongoose.Types.ObjectId(req.user._id);
+    const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
     const {
       search,
       page = 1,

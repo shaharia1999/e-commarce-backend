@@ -10,7 +10,7 @@ router.post("/", orderController.createOrder);
 
 // ✅ Get orders for logged-in user 
 router.get("/user",verifyTokenOrder , orderController.getUserOrdersbyId);
-router.get("/me", orderController.getUserOrders);
+router.get("/me", verifyToken, orderController.getUserOrders);
 router.get('/stats/monthly', verifyToken, RoleCheck(['admin','moderator']), orderController.getMonthlyOrderStats);
 router.patch('/:id/status', verifyToken, RoleCheck(['admin','moderator']), 
 orderController.updateOrderStatus);

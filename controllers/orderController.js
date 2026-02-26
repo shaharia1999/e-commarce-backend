@@ -3,7 +3,7 @@ const Product = require("../models/product.model");
 const User = require("../models/user.model");
 exports.createOrder = async (req, res) => {
   try {
-    const { address, mobile, products, deliveryCharge = 0 } = req.body;
+    const { address, mobile, products,name, deliveryCharge = 0 } = req.body;
     if (!address || !mobile || !products || !products.length) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -38,6 +38,7 @@ exports.createOrder = async (req, res) => {
 
     const order = new Order({
       user: userId,
+      name,
       address,
       mobile,
       products,

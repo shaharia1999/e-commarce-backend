@@ -55,14 +55,21 @@ exports.createOrder = async (req, res) => {
 };
 exports.getUserOrders = async (req, res) => {
   try {
-    const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    // ✅ Role validation
+    if (!["user", "admin", "moderator"].includes(userRole)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
     const {
       search,
       page = 1,
       limit = 10,
-      status, // Optional: filter by order status
-      sortBy = "createdAt", // Default sort by createdAt
-      sortOrder = "desc", // Default sort order descending
+      status,
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = req.query;
 
     const pageNum = Math.max(Number(page), 1);
@@ -72,10 +79,17 @@ exports.getUserOrders = async (req, res) => {
     let orders;
     let totalOrders;
 
-    // Base match filter for the current user
-    const baseMatch = { user: userId };
+    // ✅ Role-based filtering
+    let baseMatch = {};
 
-    // Add status filter if provided
+    // Normal user → only their orders
+    if (userRole === "user") {
+      baseMatch.user = userId;
+    }
+
+    // Admin & moderator → no user filter (see all orders)
+
+    // Status filter
     if (
       status &&
       typeof status === "string" &&
@@ -84,90 +98,80 @@ exports.getUserOrders = async (req, res) => {
       baseMatch.status = status;
     }
 
-    // Determine sort criteria
+    // Sorting
     const sortCriteria = {};
-    if (sortBy && ["createdAt", "totalAmount", "status"].includes(sortBy)) {
-      // Add more sortable fields as needed
+    if (["createdAt", "totalAmount", "status"].includes(sortBy)) {
       sortCriteria[sortBy] = sortOrder === "asc" ? 1 : -1;
     } else {
-      sortCriteria.createdAt = -1; // Default sort if invalid sortBy
+      sortCriteria.createdAt = -1;
     }
 
     if (search) {
-      // Aggregation pipeline for searching within populated product titles
-      // and potentially direct order fields like totalAmount (if number search)
       const searchRegex = { $regex: search, $options: "i" };
 
       const aggregationPipeline = [
-        { $match: baseMatch }, // Start with base user filter and optional status filter
+        { $match: baseMatch },
         {
           $lookup: {
-            from: "products", // Ensure this matches your product collection name
+            from: "products",
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts",
+            as: "productDetails",
           },
         },
-        { $unwind: "$products" }, // Unwind original products array
+        { $unwind: "$products" },
         {
           $lookup: {
-            from: "products", // Again, the product collection
+            from: "products",
             localField: "products.product",
             foreignField: "_id",
-            as: "originalProductDetails", // Join again to get product details for the original 'products' array item
+            as: "productInfo",
           },
         },
-        { $unwind: "$originalProductDetails" }, // Unwind the newly populated product details
+        { $unwind: "$productInfo" },
         {
           $match: {
             $or: [
-              { "originalProductDetails.title": searchRegex }, // Search by product title
-              // Optional: Search by order totalAmount if `search` is a number
+              { "productInfo.title": searchRegex },
               ...(isNaN(Number(search))
                 ? []
                 : [{ totalAmount: Number(search) }]),
-              // Add other direct order fields you want to search here
-              // e.g., { "address": searchRegex },
-              // e.g., { "mobile": searchRegex },
             ],
           },
         },
         {
           $group: {
-            _id: "$_id", // Group back by original order _id
+            _id: "$_id",
             user: { $first: "$user" },
             name: { $first: "$name" },
             address: { $first: "$address" },
             mobile: { $first: "$mobile" },
             products: {
               $push: {
-                product: "$originalProductDetails._id",
+                product: "$productInfo._id",
                 quantity: "$products.quantity",
               },
-            }, // Reconstruct products array with just IDs and quantity for re-population
+            },
             totalAmount: { $first: "$totalAmount" },
             deliveryCharge: { $first: "$deliveryCharge" },
             status: { $first: "$status" },
             createdAt: { $first: "$createdAt" },
             updatedAt: { $first: "$updatedAt" },
-            __v: { $first: "$__v" },
           },
         },
-        { $sort: sortCriteria }, // Apply sorting
+        { $sort: sortCriteria },
         { $skip: skip },
         { $limit: limitNum },
       ];
 
       orders = await Order.aggregate(aggregationPipeline);
 
-      // Now, populate the 'products.product' field in the aggregated results
-      // because the aggregation pipeline only re-added the product IDs.
       orders = await Order.populate(orders, {
         path: "products.product",
-        select: "title price discount mainImage", // Fields to populate
+        select: "title price discount mainImage",
       });
 
-      // Get total count for pagination with search filter
+      // Count for pagination
       const countPipeline = [
         { $match: baseMatch },
         {
@@ -175,32 +179,31 @@ exports.getUserOrders = async (req, res) => {
             from: "products",
             localField: "products.product",
             foreignField: "_id",
-            as: "populatedProducts",
+            as: "productDetails",
           },
         },
-        { $unwind: "$populatedProducts" },
+        { $unwind: "$productDetails" },
         {
           $match: {
             $or: [
-              { "populatedProducts.title": searchRegex },
+              { "productDetails.title": searchRegex },
               ...(isNaN(Number(search))
                 ? []
                 : [{ totalAmount: Number(search) }]),
             ],
           },
         },
-        { $group: { _id: "$_id" } }, // Group by original order ID to count unique orders
+        { $group: { _id: "$_id" } },
         { $count: "total" },
       ];
 
       const countResult = await Order.aggregate(countPipeline);
       totalOrders = countResult.length > 0 ? countResult[0].total : 0;
     } else {
-      // Original logic for when no search term is provided (but now with pagination and sort)
       [orders, totalOrders] = await Promise.all([
         Order.find(baseMatch)
           .populate("products.product", "title price discount mainImage")
-          .sort(sortCriteria) // Apply sorting
+          .sort(sortCriteria)
           .skip(skip)
           .limit(limitNum),
         Order.countDocuments(baseMatch),
@@ -211,13 +214,178 @@ exports.getUserOrders = async (req, res) => {
       total: totalOrders,
       page: pageNum,
       pages: Math.ceil(totalOrders / limitNum),
-      orders: orders,
+      orders,
     });
   } catch (err) {
     console.error("Error in getUserOrders:", err);
     res.status(500).json({ message: err.message });
   }
 };
+// exports.getUserOrders = async (req, res) => {
+//   try {
+//     const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware
+//     const {
+//       search,
+//       page = 1,
+//       limit = 10,
+//       status, // Optional: filter by order status
+//       sortBy = "createdAt", // Default sort by createdAt
+//       sortOrder = "desc", // Default sort order descending
+//     } = req.query;
+
+//     const pageNum = Math.max(Number(page), 1);
+//     const limitNum = Math.max(Number(limit), 1);
+//     const skip = (pageNum - 1) * limitNum;
+
+//     let orders;
+//     let totalOrders;
+
+//     // Base match filter for the current user
+//     const baseMatch = { user: userId };
+
+//     // Add status filter if provided
+//     if (
+//       status &&
+//       typeof status === "string" &&
+//       ["pending", "processing", "completed", "cancelled"].includes(status)
+//     ) {
+//       baseMatch.status = status;
+//     }
+
+//     // Determine sort criteria
+//     const sortCriteria = {};
+//     if (sortBy && ["createdAt", "totalAmount", "status"].includes(sortBy)) {
+//       // Add more sortable fields as needed
+//       sortCriteria[sortBy] = sortOrder === "asc" ? 1 : -1;
+//     } else {
+//       sortCriteria.createdAt = -1; // Default sort if invalid sortBy
+//     }
+
+//     if (search) {
+//       // Aggregation pipeline for searching within populated product titles
+//       // and potentially direct order fields like totalAmount (if number search)
+//       const searchRegex = { $regex: search, $options: "i" };
+
+//       const aggregationPipeline = [
+//         { $match: baseMatch }, // Start with base user filter and optional status filter
+//         {
+//           $lookup: {
+//             from: "products", // Ensure this matches your product collection name
+//             localField: "products.product",
+//             foreignField: "_id",
+//             as: "populatedProducts",
+//           },
+//         },
+//         { $unwind: "$products" }, // Unwind original products array
+//         {
+//           $lookup: {
+//             from: "products", // Again, the product collection
+//             localField: "products.product",
+//             foreignField: "_id",
+//             as: "originalProductDetails", // Join again to get product details for the original 'products' array item
+//           },
+//         },
+//         { $unwind: "$originalProductDetails" }, // Unwind the newly populated product details
+//         {
+//           $match: {
+//             $or: [
+//               { "originalProductDetails.title": searchRegex }, // Search by product title
+//               // Optional: Search by order totalAmount if `search` is a number
+//               ...(isNaN(Number(search))
+//                 ? []
+//                 : [{ totalAmount: Number(search) }]),
+//               // Add other direct order fields you want to search here
+//               // e.g., { "address": searchRegex },
+//               // e.g., { "mobile": searchRegex },
+//             ],
+//           },
+//         },
+//         {
+//           $group: {
+//             _id: "$_id", // Group back by original order _id
+//             user: { $first: "$user" },
+//             name: { $first: "$name" },
+//             address: { $first: "$address" },
+//             mobile: { $first: "$mobile" },
+//             products: {
+//               $push: {
+//                 product: "$originalProductDetails._id",
+//                 quantity: "$products.quantity",
+//               },
+//             }, // Reconstruct products array with just IDs and quantity for re-population
+//             totalAmount: { $first: "$totalAmount" },
+//             deliveryCharge: { $first: "$deliveryCharge" },
+//             status: { $first: "$status" },
+//             createdAt: { $first: "$createdAt" },
+//             updatedAt: { $first: "$updatedAt" },
+//             __v: { $first: "$__v" },
+//           },
+//         },
+//         { $sort: sortCriteria }, // Apply sorting
+//         { $skip: skip },
+//         { $limit: limitNum },
+//       ];
+
+//       orders = await Order.aggregate(aggregationPipeline);
+
+//       // Now, populate the 'products.product' field in the aggregated results
+//       // because the aggregation pipeline only re-added the product IDs.
+//       orders = await Order.populate(orders, {
+//         path: "products.product",
+//         select: "title price discount mainImage", // Fields to populate
+//       });
+
+//       // Get total count for pagination with search filter
+//       const countPipeline = [
+//         { $match: baseMatch },
+//         {
+//           $lookup: {
+//             from: "products",
+//             localField: "products.product",
+//             foreignField: "_id",
+//             as: "populatedProducts",
+//           },
+//         },
+//         { $unwind: "$populatedProducts" },
+//         {
+//           $match: {
+//             $or: [
+//               { "populatedProducts.title": searchRegex },
+//               ...(isNaN(Number(search))
+//                 ? []
+//                 : [{ totalAmount: Number(search) }]),
+//             ],
+//           },
+//         },
+//         { $group: { _id: "$_id" } }, // Group by original order ID to count unique orders
+//         { $count: "total" },
+//       ];
+
+//       const countResult = await Order.aggregate(countPipeline);
+//       totalOrders = countResult.length > 0 ? countResult[0].total : 0;
+//     } else {
+//       // Original logic for when no search term is provided (but now with pagination and sort)
+//       [orders, totalOrders] = await Promise.all([
+//         Order.find(baseMatch)
+//           .populate("products.product", "title price discount mainImage")
+//           .sort(sortCriteria) // Apply sorting
+//           .skip(skip)
+//           .limit(limitNum),
+//         Order.countDocuments(baseMatch),
+//       ]);
+//     }
+
+//     res.json({
+//       total: totalOrders,
+//       page: pageNum,
+//       pages: Math.ceil(totalOrders / limitNum),
+//       orders: orders,
+//     });
+//   } catch (err) {
+//     console.error("Error in getUserOrders:", err);
+//     res.status(500).json({ message: err.message });
+//   }
+// };
 exports.getUserOrdersbyId = async (req, res) => {
   try {
     const userId = req.user._id; // Ensure req.user._id is correctly populated by your auth middleware

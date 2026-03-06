@@ -5,7 +5,7 @@ const applyCommonMiddleware = (app) => {
   const allowedOrigins = [
     'http://localhost:3000',
 'https://easyshop1999.netlify.app',
- 'http://easyshop-e-commarce.shop',
+ 'https://easyshop-e-commarce.shop',
     'https://mongo-db-zeta-seven.vercel.app',
     'https://e-eomarce-edmin-eanel.vercel.app',
     'https://ecommerce-web-1l99.vercel.app'
